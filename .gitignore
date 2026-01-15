@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# DGN output folders (created by script)
+DGN_V7/
+DGN_V8/
+DGN_CONNECT/
+DGN_UNKNOWN/
+DGN_ERROR/
+
+# DGN files (don't commit actual drawings)
+*.dgn
+*.DGN
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

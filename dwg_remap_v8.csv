@@ -1,0 +1,143 @@
+; MicroStation V8/V8i DGN to DWG Remap File
+; Addresses: scaling, text, linestyle, color, and element mapping issues
+
+;------------------------------------------------------------------------------
+; FONT REMAPPING - Fixes illegible text, varying heights, faded text
+;------------------------------------------------------------------------------
+[DGN_FONT_NAME]=[DWG_FONT_FILE]
+STANDARD=txt.shx
+ENGINEERING=simplex.shx
+WORKING=simplex.shx
+FANCY=romanc.shx
+ISO=isocp.shx
+ISO_EQUAL=isocp.shx
+ARCHITECTURAL=stylus.shx
+BLOCK=monotxt.shx
+MICRO=simplex.shx
+SYMAP=simplex.shx
+ENGINEERING BUILT=simplex.shx
+BORDER=simplex.shx
+INTL_ENGINEERING=simplex.shx
+INTL_ISO=isocp.shx
+ARIAL=arial.ttf
+ARIAL NARROW=arialn.ttf
+TIMES NEW ROMAN=times.ttf
+COURIER=cour.ttf
+*=txt.shx
+
+;------------------------------------------------------------------------------
+; LINE STYLE REMAPPING - Fixes dashed to solid, centerlines missing
+;------------------------------------------------------------------------------
+[DGN_LINESTYLE]=[DWG_LINETYPE]
+0=CONTINUOUS
+1=DASHED
+2=HIDDEN
+3=CENTER
+4=PHANTOM
+5=DOT
+6=DASHDOT
+7=BORDER
+DASHED=DASHED
+DASHED2=DASHED2
+HIDDEN=HIDDEN
+HIDDEN2=HIDDEN2
+CENTER=CENTER
+CENTER2=CENTER2
+CENTERX2=CENTERX2
+PHANTOM=PHANTOM
+PHANTOM2=PHANTOM2
+DOT=DOT
+DOT2=DOT2
+DASHDOT=DASHDOT
+DASHDOT2=DASHDOT2
+DIVIDE=DIVIDE
+DIVIDE2=DIVIDE2
+BORDER=BORDER
+BORDER2=BORDER2
+ACAD_ISO02W100=ACAD_ISO02W100
+ACAD_ISO03W100=ACAD_ISO03W100
+ACAD_ISO04W100=ACAD_ISO04W100
+ACAD_ISO05W100=ACAD_ISO05W100
+*=CONTINUOUS
+
+;------------------------------------------------------------------------------
+; COLOR REMAPPING - Fixes color changes, grey/red text, faded appearance
+;------------------------------------------------------------------------------
+[DGN_COLOR]=[DWG_ACI_COLOR]
+0=7
+1=1
+2=2
+3=3
+4=4
+5=5
+6=6
+7=7
+8=8
+9=9
+10=10
+11=11
+12=12
+13=13
+14=14
+15=15
+254=254
+255=7
+
+;------------------------------------------------------------------------------
+; LEVEL/LAYER REMAPPING - Fixes missing elements, equipment, concrete
+;------------------------------------------------------------------------------
+[DGN_LEVEL]=[DWG_LAYER]
+*=*
+
+;------------------------------------------------------------------------------
+; LINE WEIGHT REMAPPING - Fixes line visibility issues
+;------------------------------------------------------------------------------
+[DGN_WEIGHT]=[DWG_LINEWEIGHT]
+0=0
+1=5
+2=9
+3=13
+4=18
+5=25
+6=35
+7=50
+8=70
+9=100
+10=140
+11=200
+
+;------------------------------------------------------------------------------
+; TEXT STYLE REMAPPING - Fixes text overlap, title block issues
+;------------------------------------------------------------------------------
+[DGN_TEXTSTYLE]=[DWG_TEXTSTYLE]
+STANDARD=STANDARD
+NOTES=STANDARD
+TITLE=STANDARD
+LABEL=STANDARD
+DIM=STANDARD
+*=STANDARD
+
+;------------------------------------------------------------------------------
+; DIMENSION STYLE REMAPPING - Fixes fractions, dimension overlap
+;------------------------------------------------------------------------------
+[DGN_DIMSTYLE]=[DWG_DIMSTYLE]
+STANDARD=STANDARD
+MECHANICAL=STANDARD
+ARCHITECTURAL=STANDARD
+*=STANDARD
+
+;------------------------------------------------------------------------------
+; CELL/BLOCK REMAPPING - Fixes valve states, symbol issues
+;------------------------------------------------------------------------------
+[DGN_CELL]=[DWG_BLOCK]
+*=*
+
+;------------------------------------------------------------------------------
+; UNIT SETTINGS - Fixes scaling issues (drawings too small/large)
+;------------------------------------------------------------------------------
+[UNITS]
+MASTER_UNITS=FEET
+SUB_UNITS=INCHES
+DWG_UNITS=INCHES
+SCALE_FACTOR=1.0
+GLOBAL_SCALE=1.0
