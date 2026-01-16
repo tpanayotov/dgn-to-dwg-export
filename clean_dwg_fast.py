@@ -297,6 +297,50 @@ def is_rectangular_polyline(entity, tolerance=5.0):
         return False
 
 
+def find_largest_3dface(doc):
+    """
+    Find the largest 3D Face entity that could be a drawing border.
+    3D Faces are commonly used as drawing frames in DGN-converted files.
+    Returns (bounds, handle) or (None, None).
+    """
+    model_space = doc.ModelSpace
+    best_face = None
+    best_area = 0
+    best_bounds = None
+
+    for i in range(model_space.Count):
+        try:
+            entity = model_space.Item(i)
+            entity_type = entity.EntityName
+
+            # Check for 3D Face entities
+            if "3dFace" in entity_type or "3DFACE" in entity_type.upper() or entity_type == "AcDb3dSolid":
+                try:
+                    min_pt, max_pt = entity.GetBoundingBox()
+                    bounds = (min_pt[0], min_pt[1], max_pt[0], max_pt[1])
+                    width = bounds[2] - bounds[0]
+                    height = bounds[3] - bounds[1]
+                    area = width * height
+
+                    # Must be reasonably large and roughly rectangular aspect ratio
+                    if area > best_area and width > 0 and height > 0:
+                        # Check aspect ratio (not too extreme for a drawing border)
+                        aspect = max(width, height) / min(width, height)
+                        if aspect < 3:  # Drawing borders are usually close to A-size ratios
+                            best_area = area
+                            best_face = entity
+                            best_bounds = bounds
+                            print(f"  Found 3D Face: {width:.1f} x {height:.1f}, area={area:.1f}")
+                except:
+                    pass
+        except Exception as e:
+            pass
+
+    if best_face:
+        return best_bounds, {best_face.Handle}
+    return None, set()
+
+
 def find_largest_rectangular_polyline(doc):
     """
     Find the largest closed polyline that looks like a rectangle.
@@ -478,24 +522,49 @@ def find_border_from_longest_lines(doc):
 def find_drawing_border(doc):
     """
     Find the drawing border. Tries multiple methods:
-    1. Look for a large rectangular polyline
-    2. Look for 4 lines forming a rectangle
+    1. Look for a large 3D Face (common in DGN-converted files)
+    2. Look for a large rectangular polyline
+    3. Look for 4 lines forming a rectangle
 
     Returns (bounds, border_handles, border_type)
     """
     print("\n--- Looking for drawing border ---")
 
-    # Method 1: Try to find a rectangular polyline first
-    print("Method 1: Looking for rectangular polyline...")
-    bounds, handles = find_largest_rectangular_polyline(doc)
-    if bounds:
-        width = bounds[2] - bounds[0]
-        height = bounds[3] - bounds[1]
-        print(f"Found polyline border: {width:.2f} x {height:.2f}")
-        return bounds, handles, "polyline"
+    # Method 1: Try to find a 3D Face first (common in DGN conversions)
+    print("Method 1: Looking for 3D Face border...")
+    bounds_3dface, handles_3dface = find_largest_3dface(doc)
 
-    # Method 2: Look for 4 lines forming a rectangle
-    print("Method 2: Looking for lines forming a rectangle...")
+    # Method 2: Try to find a rectangular polyline
+    print("Method 2: Looking for rectangular polyline...")
+    bounds_poly, handles_poly = find_largest_rectangular_polyline(doc)
+
+    # Compare 3D Face and polyline - use the larger one
+    if bounds_3dface and bounds_poly:
+        area_3dface = (bounds_3dface[2] - bounds_3dface[0]) * (bounds_3dface[3] - bounds_3dface[1])
+        area_poly = (bounds_poly[2] - bounds_poly[0]) * (bounds_poly[3] - bounds_poly[1])
+        if area_3dface >= area_poly:
+            width = bounds_3dface[2] - bounds_3dface[0]
+            height = bounds_3dface[3] - bounds_3dface[1]
+            print(f"Using 3D Face border (larger): {width:.2f} x {height:.2f}")
+            return bounds_3dface, handles_3dface, "3dface"
+        else:
+            width = bounds_poly[2] - bounds_poly[0]
+            height = bounds_poly[3] - bounds_poly[1]
+            print(f"Using polyline border (larger): {width:.2f} x {height:.2f}")
+            return bounds_poly, handles_poly, "polyline"
+    elif bounds_3dface:
+        width = bounds_3dface[2] - bounds_3dface[0]
+        height = bounds_3dface[3] - bounds_3dface[1]
+        print(f"Found 3D Face border: {width:.2f} x {height:.2f}")
+        return bounds_3dface, handles_3dface, "3dface"
+    elif bounds_poly:
+        width = bounds_poly[2] - bounds_poly[0]
+        height = bounds_poly[3] - bounds_poly[1]
+        print(f"Found polyline border: {width:.2f} x {height:.2f}")
+        return bounds_poly, handles_poly, "polyline"
+
+    # Method 3: Look for 4 lines forming a rectangle (fallback)
+    print("Method 3: Looking for lines forming a rectangle...")
     bounds, handles = find_border_from_longest_lines(doc)
     if bounds:
         return bounds, handles, "lines"
