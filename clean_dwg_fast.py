@@ -50,16 +50,17 @@ class ProcessingResult:
         self.filename = filename
         self.input_path = str(input_path)
         self.output_path = str(output_path) if output_path else ""
-        self.status = "pending"  # pending, success, failed
+        self.status = "pending"  # pending, success, failed, review
         self.error_message = ""
         self.entities_before = 0
         self.entities_after = 0
         self.entities_deleted = 0
         self.border_found = False
-        self.border_type = ""  # "polyline" or "lines"
+        self.border_type = ""  # "polyline", "lines", "3dface", "border_layer"
         self.border_width = 0.0
         self.border_height = 0.0
         self.processing_time = 0.0
+        self.needs_review = False  # Flag for files that may have issues
 
 
 def generate_csv_report(results, output_folder):
@@ -69,16 +70,17 @@ def generate_csv_report(results, output_folder):
     with open(report_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([
-            'Filename', 'Status', 'Error Message',
-            'Entities Before', 'Entities After', 'Entities Deleted',
+            'Filename', 'Status', 'Needs Review', 'Error Message',
+            'Entities Before', 'Entities After', 'Entities Deleted', 'Delete %',
             'Border Found', 'Border Type', 'Border Width', 'Border Height',
             'Processing Time (s)', 'Input Path', 'Output Path'
         ])
 
         for r in results:
+            delete_pct = (r.entities_deleted / r.entities_before * 100) if r.entities_before > 0 else 0
             writer.writerow([
-                r.filename, r.status, r.error_message,
-                r.entities_before, r.entities_after, r.entities_deleted,
+                r.filename, r.status, r.needs_review, r.error_message,
+                r.entities_before, r.entities_after, r.entities_deleted, f"{delete_pct:.1f}%",
                 r.border_found, r.border_type, f"{r.border_width:.2f}", f"{r.border_height:.2f}",
                 f"{r.processing_time:.2f}", r.input_path, r.output_path
             ])
@@ -93,6 +95,7 @@ def generate_html_report(results, output_folder):
 
     success_count = sum(1 for r in results if r.status == "success")
     failed_count = sum(1 for r in results if r.status == "failed")
+    review_count = sum(1 for r in results if r.status == "review")
     total_count = len(results)
     total_deleted = sum(r.entities_deleted for r in results)
 
@@ -111,6 +114,7 @@ def generate_html_report(results, output_folder):
         .stat-total {{ background: #2196F3; }}
         .stat-success {{ background: #4CAF50; }}
         .stat-failed {{ background: #f44336; }}
+        .stat-review {{ background: #FF9800; }}
         .stat-deleted {{ background: #9c27b0; }}
         table {{ border-collapse: collapse; width: 100%; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
         th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
@@ -118,6 +122,8 @@ def generate_html_report(results, output_folder):
         tr:hover {{ background: #f5f5f5; }}
         .status-success {{ color: #4CAF50; font-weight: bold; }}
         .status-failed {{ color: #f44336; font-weight: bold; }}
+        .status-review {{ color: #FF9800; font-weight: bold; }}
+        .row-review {{ background: #FFF3E0; }}
         .error-msg {{ color: #f44336; font-size: 12px; max-width: 300px; }}
         .timestamp {{ color: #666; font-size: 14px; }}
         .deleted-highlight {{ color: #9c27b0; font-weight: bold; }}
@@ -135,6 +141,7 @@ def generate_html_report(results, output_folder):
             <div class="stat stat-total">Total: {total_count}</div>
             <div class="stat stat-success">Success: {success_count}</div>
             <div class="stat stat-failed">Failed: {failed_count}</div>
+            <div class="stat stat-review">Needs Review: {review_count}</div>
             <div class="stat stat-deleted">Entities Removed: {total_deleted}</div>
         </div>
     </div>
@@ -155,16 +162,22 @@ def generate_html_report(results, output_folder):
 """
 
     for i, r in enumerate(results, 1):
-        status_class = "status-success" if r.status == "success" else "status-failed"
+        if r.status == "success":
+            status_class = "status-success"
+        elif r.status == "review":
+            status_class = "status-review"
+        else:
+            status_class = "status-failed"
+        row_class = "row-review" if r.status == "review" else ""
         border_info = f"{r.border_type}" if r.border_found else "Not found"
         size_info = f"{r.border_width:.0f} x {r.border_height:.0f}" if r.border_found else "-"
         error_display = f'<span class="error-msg">{r.error_message}</span>' if r.error_message else ""
         deleted_class = "deleted-highlight" if r.entities_deleted > 0 else ""
         # Create file link - use output path if available, otherwise input path
-        file_path = r.output_path if r.output_path and r.status == "success" else r.input_path
+        file_path = r.output_path if r.output_path and r.status in ("success", "review") else r.input_path
         file_link = f'<a href="file:///{file_path.replace(chr(92), "/")}" class="file-link">{r.filename}</a>'
 
-        html += f"""        <tr>
+        html += f"""        <tr class="{row_class}">
             <td>{i}</td>
             <td>{file_link}</td>
             <td class="{status_class}">{r.status.upper()}</td>
@@ -295,6 +308,67 @@ def is_rectangular_polyline(entity, tolerance=5.0):
         return True
     except:
         return False
+
+
+def find_border_by_layer(doc):
+    """
+    Find the drawing border by looking for entities on a BORDER layer.
+    Many drawings have border lines on layers named like '02_BORDER', 'BORDER', etc.
+    Returns (bounds, handles) or (None, set()).
+    """
+    model_space = doc.ModelSpace
+    border_entities = []
+
+    for i in range(model_space.Count):
+        try:
+            entity = model_space.Item(i)
+            layer_name = entity.Layer.upper()
+
+            # Check if entity is on a border layer
+            if "BORDER" in layer_name or "FRAME" in layer_name:
+                try:
+                    min_pt, max_pt = entity.GetBoundingBox()
+                    border_entities.append({
+                        'entity': entity,
+                        'handle': entity.Handle,
+                        'min_x': min_pt[0],
+                        'min_y': min_pt[1],
+                        'max_x': max_pt[0],
+                        'max_y': max_pt[1]
+                    })
+                except:
+                    pass
+        except:
+            pass
+
+    if not border_entities:
+        return None, set()
+
+    # Calculate combined bounding box of all border entities
+    min_x = min(e['min_x'] for e in border_entities)
+    min_y = min(e['min_y'] for e in border_entities)
+    max_x = max(e['max_x'] for e in border_entities)
+    max_y = max(e['max_y'] for e in border_entities)
+
+    width = max_x - min_x
+    height = max_y - min_y
+    area = width * height
+
+    # Must be reasonably sized (at least 100x100 units)
+    if width < 100 or height < 100:
+        return None, set()
+
+    # Check aspect ratio
+    aspect = max(width, height) / min(width, height) if min(width, height) > 0 else 999
+    if aspect > 5:  # Too extreme aspect ratio
+        return None, set()
+
+    print(f"  Found border layer entities: {width:.1f} x {height:.1f}, area={area:.1f}")
+
+    bounds = (min_x, min_y, max_x, max_y)
+    handles = {e['handle'] for e in border_entities}
+
+    return bounds, handles
 
 
 def find_largest_3dface(doc):
@@ -523,49 +597,52 @@ def find_border_from_longest_lines(doc):
 def find_drawing_border(doc):
     """
     Find the drawing border. Tries multiple methods:
-    1. Look for a large 3D Face (common in DGN-converted files)
-    2. Look for a large rectangular polyline
-    3. Look for 4 lines forming a rectangle
+    1. Look for entities on a BORDER layer
+    2. Look for a large 3D Face (common in DGN-converted files)
+    3. Look for a large rectangular polyline
+    4. Look for 4 lines forming a rectangle
 
     Returns (bounds, border_handles, border_type)
     """
     print("\n--- Looking for drawing border ---")
 
-    # Method 1: Try to find a 3D Face first (common in DGN conversions)
-    print("Method 1: Looking for 3D Face border...")
+    # Collect all candidates and pick the largest valid one
+    candidates = []
+
+    # Method 1: Try to find entities on a BORDER layer
+    print("Method 1: Looking for BORDER layer...")
+    bounds_layer, handles_layer = find_border_by_layer(doc)
+    if bounds_layer:
+        area = (bounds_layer[2] - bounds_layer[0]) * (bounds_layer[3] - bounds_layer[1])
+        candidates.append(('border_layer', bounds_layer, handles_layer, area))
+
+    # Method 2: Try to find a 3D Face (common in DGN conversions)
+    print("Method 2: Looking for 3D Face border...")
     bounds_3dface, handles_3dface = find_largest_3dface(doc)
+    if bounds_3dface:
+        area = (bounds_3dface[2] - bounds_3dface[0]) * (bounds_3dface[3] - bounds_3dface[1])
+        candidates.append(('3dface', bounds_3dface, handles_3dface, area))
 
-    # Method 2: Try to find a rectangular polyline
-    print("Method 2: Looking for rectangular polyline...")
+    # Method 3: Try to find a rectangular polyline
+    print("Method 3: Looking for rectangular polyline...")
     bounds_poly, handles_poly = find_largest_rectangular_polyline(doc)
+    if bounds_poly:
+        area = (bounds_poly[2] - bounds_poly[0]) * (bounds_poly[3] - bounds_poly[1])
+        candidates.append(('polyline', bounds_poly, handles_poly, area))
 
-    # Compare 3D Face and polyline - use the larger one
-    if bounds_3dface and bounds_poly:
-        area_3dface = (bounds_3dface[2] - bounds_3dface[0]) * (bounds_3dface[3] - bounds_3dface[1])
-        area_poly = (bounds_poly[2] - bounds_poly[0]) * (bounds_poly[3] - bounds_poly[1])
-        if area_3dface >= area_poly:
-            width = bounds_3dface[2] - bounds_3dface[0]
-            height = bounds_3dface[3] - bounds_3dface[1]
-            print(f"Using 3D Face border (larger): {width:.2f} x {height:.2f}")
-            return bounds_3dface, handles_3dface, "3dface"
-        else:
-            width = bounds_poly[2] - bounds_poly[0]
-            height = bounds_poly[3] - bounds_poly[1]
-            print(f"Using polyline border (larger): {width:.2f} x {height:.2f}")
-            return bounds_poly, handles_poly, "polyline"
-    elif bounds_3dface:
-        width = bounds_3dface[2] - bounds_3dface[0]
-        height = bounds_3dface[3] - bounds_3dface[1]
-        print(f"Found 3D Face border: {width:.2f} x {height:.2f}")
-        return bounds_3dface, handles_3dface, "3dface"
-    elif bounds_poly:
-        width = bounds_poly[2] - bounds_poly[0]
-        height = bounds_poly[3] - bounds_poly[1]
-        print(f"Found polyline border: {width:.2f} x {height:.2f}")
-        return bounds_poly, handles_poly, "polyline"
+    # Pick the largest candidate
+    if candidates:
+        # Sort by area descending
+        candidates.sort(key=lambda x: x[3], reverse=True)
+        best = candidates[0]
+        border_type, bounds, handles, area = best
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+        print(f"Using {border_type} border (largest): {width:.2f} x {height:.2f}")
+        return bounds, handles, border_type
 
-    # Method 3: Look for 4 lines forming a rectangle (fallback)
-    print("Method 3: Looking for lines forming a rectangle...")
+    # Method 4: Look for 4 lines forming a rectangle (fallback)
+    print("Method 4: Looking for lines forming a rectangle...")
     bounds, handles = find_border_from_longest_lines(doc)
     if bounds:
         return bounds, handles, "lines"
@@ -748,6 +825,14 @@ def process_dwg_file(acad, dwg_path, output_folder):
         except:
             pass
 
+    # Check if file needs review (>50% entities deleted)
+    if result.entities_before > 0:
+        delete_percentage = (result.entities_deleted / result.entities_before) * 100
+        if delete_percentage > 50:
+            result.needs_review = True
+            result.status = "review"
+            print(f"WARNING: {delete_percentage:.1f}% entities deleted - flagged for review!")
+
     result.processing_time = time.time() - start_time
     return result
 
@@ -800,12 +885,14 @@ def process_folder(input_folder, output_folder):
     # Print summary
     success_count = sum(1 for r in results if r.status == "success")
     fail_count = sum(1 for r in results if r.status == "failed")
+    review_count = sum(1 for r in results if r.status == "review")
     total_deleted = sum(r.entities_deleted for r in results)
 
     print(f"\n{'='*60}")
     print(f"Processing complete! (FAST MODE)")
-    print(f"  Success: {success_count}")
-    print(f"  Failed:  {fail_count}")
+    print(f"  Success:      {success_count}")
+    print(f"  Failed:       {fail_count}")
+    print(f"  Needs Review: {review_count}")
     print(f"  Total entities removed: {total_deleted}")
     print(f"{'='*60}")
 
@@ -815,6 +902,14 @@ def process_folder(input_folder, output_folder):
         for r in results:
             if r.status == "failed":
                 print(f"  - {r.filename}: {r.error_message}")
+
+    # List files needing review
+    if review_count > 0:
+        print("\nFiles needing review (>50% entities deleted):")
+        for r in results:
+            if r.status == "review":
+                pct = (r.entities_deleted / r.entities_before * 100) if r.entities_before > 0 else 0
+                print(f"  - {r.filename}: {pct:.1f}% deleted ({r.entities_deleted}/{r.entities_before})")
 
 
 def main():
