@@ -283,7 +283,7 @@ def is_rectangular_polyline(entity, tolerance=5.0):
 def find_largest_3dface(doc):
     """
     Find the largest 3D Face entity that could be a drawing border.
-    3D Faces are commonly used as drawing frames in DGN-converted files.
+    3D Faces (AcDbFace) are commonly used as drawing frames in DGN-converted files.
     Returns (bounds, handle) or (None, None).
     """
     model_space = doc.ModelSpace
@@ -291,19 +291,14 @@ def find_largest_3dface(doc):
     best_area = 0
     best_bounds = None
 
-    # Collect unique entity types for debugging
-    entity_types_found = set()
-
     for i in range(model_space.Count):
         try:
             entity = model_space.Item(i)
             entity_type = entity.EntityName
-            entity_types_found.add(entity_type)
 
-            # Check for 3D Face entities (various possible names)
+            # Check for 3D Face entities
             # AcDbFace is the internal name for 3D Face in AutoCAD
-            if ("Face" in entity_type or "FACE" in entity_type.upper() or
-                "3d" in entity_type.lower() or "Solid" in entity_type):
+            if entity_type == "AcDbFace" or "Face" in entity_type:
                 try:
                     min_pt, max_pt = entity.GetBoundingBox()
                     bounds = (min_pt[0], min_pt[1], max_pt[0], max_pt[1])
@@ -319,14 +314,11 @@ def find_largest_3dface(doc):
                             best_area = area
                             best_face = entity
                             best_bounds = bounds
-                            print(f"  Found 3D Face ({entity_type}): {width:.1f} x {height:.1f}, area={area:.1f}")
+                            print(f"  Found 3D Face: {width:.1f} x {height:.1f}, area={area:.1f}")
                 except:
                     pass
         except Exception as e:
             pass
-
-    # Print entity types found for debugging
-    print(f"  Entity types in drawing: {sorted(entity_types_found)}")
 
     if best_face:
         return best_bounds, {best_face.Handle}
