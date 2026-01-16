@@ -1,5 +1,8 @@
 """
-DWG Cleaner - Extract schematic drawing from DWG files
+DWG Cleaner - FAST MODE - Extract schematic drawing from DWG files
+
+This is the optimized fast version with reduced wait times.
+Use this for faster processing, but switch to standard mode if you encounter errors.
 
 This script:
 1. Opens DWG files
@@ -9,7 +12,7 @@ This script:
 5. Generates CSV and HTML reports
 
 Usage:
-    python clean_dwg.py <input_dwg_or_folder>
+    python clean_dwg_fast.py <input_dwg_or_folder>
 """
 
 import os
@@ -26,6 +29,19 @@ try:
 except ImportError:
     print("Error: pywin32 is required. Install with: pip install pywin32")
     sys.exit(1)
+
+
+# =============================================================================
+# FAST MODE TIMING CONFIGURATION
+# =============================================================================
+TIMING = {
+    'after_open': 0.5,      # Standard: 2.0s
+    'after_zoom': 0.1,      # Standard: 0.5s
+    'after_purge': 0.5,     # Standard: 2.0s
+    'after_close': 0.3,     # Standard: 1.0s
+    'retry_delay': 2.0,     # Standard: 5.0s
+    'max_retries': 2,       # Standard: 3
+}
 
 
 class ProcessingResult:
@@ -84,10 +100,11 @@ def generate_html_report(results, output_folder):
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>DWG Cleaner Report</title>
+    <title>DWG Cleaner Report (FAST MODE)</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
         h1 {{ color: #333; }}
+        .fast-mode {{ color: #ff9800; font-size: 14px; }}
         .summary {{ background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
         .summary-stats {{ display: flex; gap: 20px; margin-top: 10px; flex-wrap: wrap; }}
         .stat {{ padding: 15px 25px; border-radius: 6px; color: white; font-size: 18px; }}
@@ -109,7 +126,7 @@ def generate_html_report(results, output_folder):
     </style>
 </head>
 <body>
-    <h1>DWG Cleaner Report</h1>
+    <h1>DWG Cleaner Report <span class="fast-mode">(FAST MODE)</span></h1>
     <p class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
 
     <div class="summary">
@@ -544,7 +561,7 @@ def delete_entities_outside_bounds(doc, bounds, border_handles):
     return deleted_count
 
 
-def process_dwg_file(acad, dwg_path, output_folder, max_retries=3, retry_delay=5):
+def process_dwg_file(acad, dwg_path, output_folder):
     """Process a single DWG file. Returns ProcessingResult."""
     dwg_path = Path(dwg_path)
     output_path = Path(output_folder) / dwg_path.name
@@ -557,32 +574,35 @@ def process_dwg_file(acad, dwg_path, output_folder, max_retries=3, retry_delay=5
     print(f"Processing: {dwg_path.name}")
     print(f"{'='*60}")
 
-    # Get fresh connection
-    acad = get_autocad()
-
-    # Open the DWG file with retry mechanism
+    # Open the DWG file with retry mechanism (FAST: fewer retries, shorter delay)
     doc = None
     last_error = None
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, TIMING['max_retries'] + 1):
         try:
             doc = acad.Documents.Open(str(dwg_path))
-            time.sleep(2)
+            time.sleep(TIMING['after_open'])
             break  # Success, exit retry loop
         except Exception as e:
             last_error = str(e)
-            if attempt < max_retries:
-                print(f"Error opening file (attempt {attempt}/{max_retries}): {last_error}")
-                print(f"Waiting {retry_delay} seconds before retry...")
-                time.sleep(retry_delay)
+            if attempt < TIMING['max_retries']:
+                print(f"Error opening file (attempt {attempt}/{TIMING['max_retries']}): {last_error}")
+                print(f"Waiting {TIMING['retry_delay']} seconds before retry...")
+                time.sleep(TIMING['retry_delay'])
                 # Get fresh AutoCAD connection for retry
                 acad = get_autocad()
             else:
-                print(f"Error opening file (attempt {attempt}/{max_retries}): {last_error}")
-                print(f"All {max_retries} attempts failed.")
+                print(f"Error opening file (attempt {attempt}/{TIMING['max_retries']}): {last_error}")
+                print(f"All {TIMING['max_retries']} attempts failed.")
                 result.status = "failed"
-                result.error_message = f"Failed to open after {max_retries} attempts: {last_error}"
+                result.error_message = f"Failed to open after {TIMING['max_retries']} attempts: {last_error}"
                 result.processing_time = time.time() - start_time
                 return result
+
+    # FAST: Disable regeneration for speed
+    try:
+        doc.SendCommand("REGENMODE 0\n")
+    except:
+        pass
 
     # Count entities before
     try:
@@ -607,7 +627,7 @@ def process_dwg_file(acad, dwg_path, output_folder, max_retries=3, retry_delay=5
 
         # Zoom to extents
         doc.SendCommand("_ZOOM _E \n")
-        time.sleep(0.5)
+        time.sleep(TIMING['after_zoom'])
 
         # Count entities after
         try:
@@ -616,9 +636,18 @@ def process_dwg_file(acad, dwg_path, output_folder, max_retries=3, retry_delay=5
         except:
             result.entities_after = result.entities_before - result.entities_deleted
 
-    # Purge unused elements
-    doc.SendCommand("-PURGE\nA\n*\nN\n")
-    time.sleep(2)
+    # FAST: Only purge if entities were deleted
+    if result.entities_deleted > 0:
+        doc.SendCommand("-PURGE\nA\n*\nN\n")
+        time.sleep(TIMING['after_purge'])
+    else:
+        print("Skipping purge (no entities deleted)")
+
+    # FAST: Re-enable regeneration
+    try:
+        doc.SendCommand("REGENMODE 1\n")
+    except:
+        pass
 
     # Ensure output directory exists
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -639,13 +668,13 @@ def process_dwg_file(acad, dwg_path, output_folder, max_retries=3, retry_delay=5
     try:
         doc.Close(False)  # False = don't save again (already saved)
         print(f"Closed: {dwg_path.name}")
-        time.sleep(1)  # Give AutoCAD time to fully close the document
+        time.sleep(TIMING['after_close'])
     except Exception as e:
         print(f"Warning: Error closing document: {e}")
         # Try alternative close method
         try:
             doc.SendCommand("_.CLOSE\n_N\n")  # Close without saving
-            time.sleep(2)
+            time.sleep(1)
         except:
             pass
 
@@ -672,6 +701,7 @@ def process_folder(input_folder, output_folder):
 
     print(f"Found {len(dwg_files)} DWG file(s)")
 
+    # FAST: Get AutoCAD connection once and reuse
     acad = get_autocad()
     results = []
 
@@ -687,7 +717,7 @@ def process_folder(input_folder, output_folder):
             result.error_message = f"Unexpected error: {str(e)}"
             results.append(result)
             print(f"Error processing {dwg_file.name}: {e}")
-            time.sleep(2)
+            time.sleep(1)
 
     # Ensure output folder exists for reports
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -703,7 +733,7 @@ def process_folder(input_folder, output_folder):
     total_deleted = sum(r.entities_deleted for r in results)
 
     print(f"\n{'='*60}")
-    print(f"Processing complete!")
+    print(f"Processing complete! (FAST MODE)")
     print(f"  Success: {success_count}")
     print(f"  Failed:  {fail_count}")
     print(f"  Total entities removed: {total_deleted}")
@@ -719,11 +749,14 @@ def process_folder(input_folder, output_folder):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python clean_dwg.py <input_dwg_or_folder>")
+        print("Usage: python clean_dwg_fast.py <input_dwg_or_folder>")
+        print("")
+        print("This is the FAST MODE version with optimized timings.")
+        print("Use standard clean_dwg.py if you encounter errors.")
         print("")
         print("Examples:")
-        print("  python clean_dwg.py drawing.dwg")
-        print("  python clean_dwg.py C:\\DWG_Files")
+        print("  python clean_dwg_fast.py drawing.dwg")
+        print("  python clean_dwg_fast.py C:\\DWG_Files")
         print("")
         print("Output will be saved to a CLEAN subfolder")
         sys.exit(1)
@@ -737,7 +770,7 @@ def main():
         output_folder = input_path / "CLEAN"
 
     print("="*60)
-    print("DWG Cleaner - Extract Schematic Drawing")
+    print("DWG Cleaner - FAST MODE")
     print("="*60)
     print(f"Input:  {input_path}")
     print(f"Output: {output_folder}")
