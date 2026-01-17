@@ -39,8 +39,8 @@ TIMING = {
     'after_zoom': 0.1,      # Standard: 0.5s
     'after_purge': 0.5,     # Standard: 2.0s
     'after_close': 0.3,     # Standard: 1.0s
-    'retry_delay': 2.0,     # Standard: 5.0s
-    'max_retries': 2,       # Standard: 3
+    'retry_delay': 3.0,     # Standard: 5.0s (increased from 2.0 for reliability)
+    'max_retries': 3,       # Standard: 3 (increased from 2)
 }
 
 
