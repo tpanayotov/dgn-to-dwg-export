@@ -295,8 +295,8 @@ def is_rectangular_polyline(entity, tolerance=5.0):
 
 def find_border_by_layer(doc):
     """
-    Find the drawing border by looking for entities on a BORDER layer.
-    Many drawings have border lines on layers named like '02_BORDER', 'BORDER', etc.
+    Find the drawing border by looking for entities on a BORDER or Defpoints layer.
+    Many drawings have border lines on layers named like '02_BORDER', 'BORDER', 'Defpoints', etc.
     Returns (bounds, handles) or (None, set()).
     """
     model_space = doc.ModelSpace
@@ -307,8 +307,8 @@ def find_border_by_layer(doc):
             entity = model_space.Item(i)
             layer_name = entity.Layer.upper()
 
-            # Check if entity is on a border layer
-            if "BORDER" in layer_name or "FRAME" in layer_name:
+            # Check if entity is on a border layer or Defpoints layer
+            if "BORDER" in layer_name or "FRAME" in layer_name or layer_name == "DEFPOINTS":
                 try:
                     min_pt, max_pt = entity.GetBoundingBox()
                     border_entities.append({
@@ -346,7 +346,7 @@ def find_border_by_layer(doc):
     if aspect > 5:  # Too extreme aspect ratio
         return None, set()
 
-    print(f"  Found border layer entities: {width:.1f} x {height:.1f}, area={area:.1f}")
+    print(f"  Found border/defpoints layer entities: {width:.1f} x {height:.1f}, area={area:.1f}")
 
     bounds = (min_x, min_y, max_x, max_y)
     handles = {e['handle'] for e in border_entities}
@@ -580,7 +580,7 @@ def find_border_from_longest_lines(doc):
 def find_drawing_border(doc):
     """
     Find the drawing border. Tries multiple methods:
-    1. Look for entities on a BORDER layer
+    1. Look for entities on a BORDER or Defpoints layer
     2. Look for a large 3D Face (common in DGN-converted files)
     3. Look for a large rectangular polyline
     4. Look for 4 lines forming a rectangle
@@ -592,8 +592,8 @@ def find_drawing_border(doc):
     # Collect all candidates and pick the largest valid one
     candidates = []
 
-    # Method 1: Try to find entities on a BORDER layer
-    print("Method 1: Looking for BORDER layer...")
+    # Method 1: Try to find entities on a BORDER or Defpoints layer
+    print("Method 1: Looking for BORDER/Defpoints layer...")
     bounds_layer, handles_layer = find_border_by_layer(doc)
     if bounds_layer:
         area = (bounds_layer[2] - bounds_layer[0]) * (bounds_layer[3] - bounds_layer[1])
