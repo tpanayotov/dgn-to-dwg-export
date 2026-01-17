@@ -310,10 +310,59 @@ def is_rectangular_polyline(entity, tolerance=5.0):
         return False
 
 
+def find_border_block_reference(doc):
+    """
+    Find a block reference that represents the drawing border.
+    Block references with names containing 'BORDER' or 'FRAME' are common border indicators.
+    Returns (bounds, handles) or (None, set()).
+    """
+    model_space = doc.ModelSpace
+    best_block = None
+    best_area = 0
+    best_bounds = None
+
+    for i in range(model_space.Count):
+        try:
+            entity = model_space.Item(i)
+            entity_type = entity.EntityName
+
+            # Check for block references (AcDbBlockReference)
+            if "BlockReference" in entity_type or entity_type == "AcDbBlockReference":
+                try:
+                    # Get block name
+                    block_name = entity.Name.upper() if hasattr(entity, 'Name') else ""
+
+                    # Check if this is a border block
+                    if "BORDER" in block_name or "FRAME" in block_name or "TITLE" in block_name:
+                        min_pt, max_pt = entity.GetBoundingBox()
+                        bounds = (min_pt[0], min_pt[1], max_pt[0], max_pt[1])
+                        width = bounds[2] - bounds[0]
+                        height = bounds[3] - bounds[1]
+                        area = width * height
+
+                        # Must be reasonably large
+                        if area > best_area and width > 100 and height > 100:
+                            # Check aspect ratio
+                            aspect = max(width, height) / min(width, height) if min(width, height) > 0 else 999
+                            if aspect < 5:
+                                best_area = area
+                                best_block = entity
+                                best_bounds = bounds
+                                print(f"  Found border block '{entity.Name}': {width:.1f} x {height:.1f}, area={area:.1f}")
+                except:
+                    pass
+        except:
+            pass
+
+    if best_block:
+        return best_bounds, {best_block.Handle}
+    return None, set()
+
+
 def find_border_by_layer(doc):
     """
-    Find the drawing border by looking for entities on a BORDER or Defpoints layer.
-    Many drawings have border lines on layers named like '02_BORDER', 'BORDER', 'Defpoints', etc.
+    Find the drawing border by looking for entities on a BORDER, Defpoints, or Level layer.
+    Many drawings have border lines on layers named like '02_BORDER', 'BORDER', 'Defpoints', 'Level 60', etc.
     Returns (bounds, handles) or (None, set()).
     """
     model_space = doc.ModelSpace
@@ -324,8 +373,10 @@ def find_border_by_layer(doc):
             entity = model_space.Item(i)
             layer_name = entity.Layer.upper()
 
-            # Check if entity is on a border layer or Defpoints layer
-            if "BORDER" in layer_name or "FRAME" in layer_name or layer_name == "DEFPOINTS":
+            # Check if entity is on a border layer, Defpoints layer, or Level layer (DGN conversion)
+            is_border_layer = ("BORDER" in layer_name or "FRAME" in layer_name or
+                              layer_name == "DEFPOINTS" or layer_name.startswith("LEVEL "))
+            if is_border_layer:
                 try:
                     min_pt, max_pt = entity.GetBoundingBox()
                     border_entities.append({
@@ -363,7 +414,7 @@ def find_border_by_layer(doc):
     if aspect > 5:  # Too extreme aspect ratio
         return None, set()
 
-    print(f"  Found border/defpoints layer entities: {width:.1f} x {height:.1f}, area={area:.1f}")
+    print(f"  Found border/defpoints/level layer entities: {width:.1f} x {height:.1f}, area={area:.1f}")
 
     bounds = (min_x, min_y, max_x, max_y)
     handles = {e['handle'] for e in border_entities}
@@ -597,10 +648,11 @@ def find_border_from_longest_lines(doc):
 def find_drawing_border(doc):
     """
     Find the drawing border. Tries multiple methods:
-    1. Look for entities on a BORDER or Defpoints layer
-    2. Look for a large 3D Face (common in DGN-converted files)
-    3. Look for a large rectangular polyline
-    4. Look for 4 lines forming a rectangle
+    1. Look for block references named BORDER/FRAME
+    2. Look for entities on a BORDER, Defpoints, or Level layer
+    3. Look for a large 3D Face (common in DGN-converted files)
+    4. Look for a large rectangular polyline
+    5. Look for 4 lines forming a rectangle
 
     Returns (bounds, border_handles, border_type)
     """
@@ -609,22 +661,29 @@ def find_drawing_border(doc):
     # Collect all candidates and pick the largest valid one
     candidates = []
 
-    # Method 1: Try to find entities on a BORDER or Defpoints layer
-    print("Method 1: Looking for BORDER/Defpoints layer...")
+    # Method 1: Try to find a BORDER block reference
+    print("Method 1: Looking for BORDER block reference...")
+    bounds_block, handles_block = find_border_block_reference(doc)
+    if bounds_block:
+        area = (bounds_block[2] - bounds_block[0]) * (bounds_block[3] - bounds_block[1])
+        candidates.append(('border_block', bounds_block, handles_block, area))
+
+    # Method 2: Try to find entities on a BORDER, Defpoints, or Level layer
+    print("Method 2: Looking for BORDER/Defpoints/Level layer...")
     bounds_layer, handles_layer = find_border_by_layer(doc)
     if bounds_layer:
         area = (bounds_layer[2] - bounds_layer[0]) * (bounds_layer[3] - bounds_layer[1])
         candidates.append(('border_layer', bounds_layer, handles_layer, area))
 
-    # Method 2: Try to find a 3D Face (common in DGN conversions)
-    print("Method 2: Looking for 3D Face border...")
+    # Method 3: Try to find a 3D Face (common in DGN conversions)
+    print("Method 3: Looking for 3D Face border...")
     bounds_3dface, handles_3dface = find_largest_3dface(doc)
     if bounds_3dface:
         area = (bounds_3dface[2] - bounds_3dface[0]) * (bounds_3dface[3] - bounds_3dface[1])
         candidates.append(('3dface', bounds_3dface, handles_3dface, area))
 
-    # Method 3: Try to find a rectangular polyline
-    print("Method 3: Looking for rectangular polyline...")
+    # Method 4: Try to find a rectangular polyline
+    print("Method 4: Looking for rectangular polyline...")
     bounds_poly, handles_poly = find_largest_rectangular_polyline(doc)
     if bounds_poly:
         area = (bounds_poly[2] - bounds_poly[0]) * (bounds_poly[3] - bounds_poly[1])
@@ -641,8 +700,8 @@ def find_drawing_border(doc):
         print(f"Using {border_type} border (largest): {width:.2f} x {height:.2f}")
         return bounds, handles, border_type
 
-    # Method 4: Look for 4 lines forming a rectangle (fallback)
-    print("Method 4: Looking for lines forming a rectangle...")
+    # Method 5: Look for 4 lines forming a rectangle (fallback)
+    print("Method 5: Looking for lines forming a rectangle...")
     bounds, handles = find_border_from_longest_lines(doc)
     if bounds:
         return bounds, handles, "lines"
